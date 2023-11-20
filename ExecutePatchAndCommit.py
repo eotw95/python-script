@@ -14,28 +14,50 @@ class ExecutePatchAndCommit():
             if not os.path.isfile(patchFilePath) :
                 print("FAILED: patch file does not exist");
             else :
-                print(f"### Start check {patchFileName}")
-                # cd target repo
+                # cd target repo and check commit msg
                 targetRepoPath = None
                 with open(patchFilePath, "r") as patch :
                     lines = patch.readlines();
+                    invalidMsg = True
                     for line in lines :
+                        # check commit msg
+                        checkMsg = line.startswith('Subject:')
+                        if checkMsg :
+                            subject = re.sub(r"Subject:|\[.*?\]", "", line).strip();
+                            prefix = subject.split(" ")[0].strip();
+                            expectPrefixs = ["Fix", "Add", "Change", "Remove", "Revert", "Clean", "Update", "Merge"];
+                            invalid = True
+                            for expect in expectPrefixs :
+                                if prefix == expect :
+                                    invalid = False
+                                    break
+                            if invalid :
+                                    print(f"FAILED: [{patchFileName}] commit message is invalid. prefix is {prefix}");
+                                    exit();
+                            if len(subject) > 50 :
+                                    print(f"FAILED: [{patchFileName}] subject should be limited to 50 characters. characters is {len(subject)}");
+                                    exit();
+                            invalidMsg = False
+
+                        # get target repo path
                         if line.startswith("GIT_APPLY_TOP_DIR=") :
                             targetRepoPath = line.split("=")[1].strip()
-                            print(f"targetRepoPath={targetRepoPath}")
+
+                    if invalidMsg :
+                        print(f"FAILED: [{patchFileName}] Subject is not found");
+                        exit();
+
                 targetRepoAbsPath = os.path.abspath(targetRepoPath)
                 curDirPath = os.getcwd();
 
-                print(f"cd {targetRepoAbsPath}");
                 os.chdir(targetRepoAbsPath);
 
                 # git apply --check
-                print(f"git apply --check {patchFilePath}")
                 applyPatchResult = os.system(f"git apply --check {patchFilePath}");
                 if applyPatchResult != 0:
-                    print(f"FAILED: Check apply failed {patchFileName}");
+                    print(f"FAILED: apply check failed {patchFileName}");
                     exit();
-                print(f"Check apply success {patchFileName} ");
+                print(f"apply check success {patchFileName} ");
 
                 # WA: Back to start directory
                 # During the second iteration in the for loop, 
@@ -61,14 +83,13 @@ class ExecutePatchAndCommit():
                 targetRepoAbsPath = os.path.abspath(targetRepoPath)
                 curDirPath = os.getcwd();
 
-                print(f"cd {targetRepoAbsPath}");
                 os.chdir(targetRepoAbsPath);
 
                 # git apply
-                print(f"git apply {patchFilePath}");
+                print(f"git apply {patchFileName}");
                 applyResult = os.system(f"git apply {patchFilePath}");
                 if applyResult != 0 :
-                    print(f"FAILED: git apply failed {patchFilePath}");
+                    print(f"FAILED: git apply failed {patchFileName}");
                     exit();
 
                 # git add
@@ -79,7 +100,6 @@ class ExecutePatchAndCommit():
                         match = re.match(filePattern, line);
                         if match :
                             targetFile = match.group(1);
-                            print(f"git add {targetFile}");
                             addResult = os.system(f"git add {targetFile}");
                             if addResult != 0 :
                                 print(f"FAILED: git add failed {targetFile}");
@@ -87,11 +107,6 @@ class ExecutePatchAndCommit():
 
                 # git commit
                 subject = None
-                testReport = None
-                changeId = None
-                subjectPattern = r"Subject: (.+)"
-                testReportPattern = r"\[Test Report\]\n(.+)"
-                changeIdPattern = r"Change-Id: (.+)"
 
                 with open(patchFilePath, "r") as patch :
                     lines = patch.readlines();
@@ -100,21 +115,7 @@ class ExecutePatchAndCommit():
                         if line.startswith('Subject:'):
                             subject = re.sub(r"Subject:|\[.*?\]", "", line).strip();
 
-                        # [Test report]
-                        testReportMatch = re.match(testReportPattern, line);
-                        if testReportMatch :
-                            testReport = testReportMatch.group(1).strip();
-
-                        # Change Id:
-                        changeIdMatch = re.match(changeIdPattern, line);
-                        if changeIdMatch :
-                            changeId = changeIdMatch.group(1).strip();
-
-                commitMessage = None            
-                if changeId == None :
-                    commitMessage = f"git commit -m '{subject}' -m '({patchFileName})' -m 'Test: {testReport}'";
-                else :
-                    commitMessage = f"git commit -m '{subject}' -m '({patchFileName})' -m 'Test: {testReport}' -m 'Change-Id: {changeId}'";
+                commitMessage = f"git commit -m '{subject}' -m '({patchFileName})' -m 'Test: None'";
                 print(commitMessage);
                 commitResult = os.system(commitMessage);
                 if commitResult != 0 :
